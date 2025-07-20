@@ -1,0 +1,208 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+
+//SENSOR PIN
+#define S1 2
+#define S2 3
+#define S3 4
+#define S4 5
+#define S5 6
+
+//MOTOR PIN
+#define IN1 11
+#define IN2 12
+#define IN3 13
+#define IN4 10
+
+//FSM
+enum State {
+  START,
+  TURN1,
+  STRAIGHT1,
+  TURN2,
+  STRAIGHT2,
+  TURN3,
+  STRAIGHT3,
+  TURN4,
+  STRAIGHT4,
+  STOP
+};
+
+State currentState = START;
+
+//xử lí nhiễu nma ch hết nhiễu :))
+bool lastIntersection = false;
+unsigned long lastIntersectionTime = 0;
+const unsigned long debounceDelay = 600;
+
+
+void setup() {
+  Serial.begin(9600);
+  
+  pinMode(S1, INPUT);
+  pinMode(S2, INPUT);
+  pinMode(S3, INPUT);
+  pinMode(S4, INPUT);
+  pinMode(S5, INPUT);
+
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  
+  // Khởi động OLED
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("Không tìm thấy màn hình OLED"));
+    for (;;);
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+}
+
+//Motor Config
+void forward() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+}
+
+void stopMotors() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+}
+
+void turnLeft() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+}
+
+void turnRight() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+}
+
+void turnLeftSlight() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+}
+
+void turnRightSlight() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+}
+
+void followLine(int s2, int s3, int s4) {
+  if (s3 == 0 && s2 == 1 && s4 == 1) {
+    forward();
+  } else if (s2 == 0) {
+    turnLeftSlight();
+  } else if (s4 == 0) {
+    turnRightSlight();
+  } else if (s2 == 0 && s3 == 0 && s4 == 0) {
+    forward();
+  } else {
+    stopMotors();
+  }
+}
+
+bool isIntersection(int s1, int s5) {
+  return (s1 == 0 || s5 == 0);
+}
+
+
+void loop() {
+  int s1 = !digitalRead(S1);
+  int s2 = !digitalRead(S2);
+  int s3 = !digitalRead(S3);
+  int s4 = !digitalRead(S4);
+  int s5 = !digitalRead(S5);
+
+  //Serialmonitor
+  Serial.print(s1); Serial.print(" ");
+  Serial.print(s2); Serial.print(" ");
+  Serial.print(s3); Serial.print(" ");
+  Serial.print(s4); Serial.print(" ");
+  Serial.print(s5); Serial.print(" ");
+  Serial.println(currentState);
+
+  
+  // OLED Display
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.print("S1 S2 S3 S4 S5 ST");
+
+
+  display.setCursor(0, 16);
+  display.print(s1); display.print("  ");
+  display.print(s2); display.print("  ");
+  display.print(s3); display.print("  ");
+  display.print(s4); display.print("  ");
+  display.print(s5); display.print("  ");
+  display.print(currentState);
+
+  display.display();
+  delay(20);
+
+  bool currentIntersection = isIntersection(s1, s5);
+
+  //FSM state
+  if (currentIntersection && !lastIntersection && millis() - lastIntersectionTime > debounceDelay) {
+    lastIntersectionTime = millis();
+
+    switch (currentState) {
+      case START: currentState = TURN1; break;
+      case STRAIGHT1: currentState = TURN2; break;
+      case STRAIGHT2: currentState = TURN3; break;
+      case STRAIGHT3: currentState = TURN4; break;
+      case STRAIGHT4: currentState = STOP; break;
+    }
+  }
+
+  //switch FSM
+  switch (currentState) {
+    case START:
+    case STRAIGHT1:
+    case STRAIGHT2:
+    case STRAIGHT3:
+    case STRAIGHT4:
+      followLine(s2, s3, s4);
+      break;
+
+    case TURN1:
+      turnRight(); delay(400);
+      currentState = STRAIGHT1;
+      break;
+
+    case TURN2:
+      turnLeft(); delay(400);
+      currentState = STRAIGHT2;
+      break;
+
+    case TURN3:
+      turnRight(); delay(400);
+      currentState = STRAIGHT3;
+      break;
+
+    case TURN4:
+      turnLeft(); delay(400);
+      currentState = STRAIGHT4;
+      break;
+
+    case STOP:
+      stopMotors();
+      break;
+  }
+
+  lastIntersection = currentIntersection;
+
+  delay(30);
+}
